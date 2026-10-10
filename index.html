@@ -97,10 +97,14 @@
 
             <div class="panel-block">
               <div class="block-title">Offset Margin <span id="marginFor" class="block-title-note"></span></div>
-              <label class="field-label">
-                Space around artwork: <span id="marginValue">1.0</span> mm
-                <input id="marginSlider" type="range" min="0.2" max="10" step="0.1" value="1" />
-              </label>
+              <div class="field-label">
+                <label class="field-inline">
+                  Space around artwork:
+                  <input id="marginInput" type="number" min="0.2" max="10" step="0.1" value="1.0" />
+                  mm
+                </label>
+                <input id="marginSlider" type="range" min="0.2" max="10" step="0.1" value="1" aria-label="Space around artwork (mm)" />
+              </div>
               <label class="checkbox-row" style="margin-top: 10px;">
                 <input id="sharpCornersToggle" type="checkbox" />
                 Preserve sharp corners

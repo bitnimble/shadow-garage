@@ -389,6 +389,20 @@ html, body {
   margin-top: 6px;
   accent-color: var(--accent);
 }
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.field-inline input[type="number"] {
+  width: 64px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 13px;
+  background: var(--panel-bg);
+  color: var(--text);
+}
 
 select {
   display: block;
