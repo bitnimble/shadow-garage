@@ -1,8 +1,9 @@
 import "./style.css";
 import { extractAlphaMask, type RawMask } from "./lib/trace";
 import { computeDesign, type DesignResult } from "./lib/design";
-import { SHEET_SIZES, packMixedSheet, type SheetSize } from "./lib/sheet";
+import { SHEET_SIZES, packMixedSheet, type MixedPlacement, type SheetSize } from "./lib/sheet";
 import { buildSingleStickerSVG, buildSheetSVG, type RenderOptions, type SheetItem } from "./lib/svgBuilder";
+import { bakeColorAdjust, COLOR_ADJUST_KEYS, isNoColorAdjust, NO_COLOR_ADJUST, type ColorAdjust } from "./lib/colorAdjust";
 import { getRegmarkKeepoutRects, REGMARK_ORIGIN_MM } from "./lib/regmarks";
 import { downloadSvgString } from "./lib/download";
 import { printSvg } from "./lib/print";
@@ -62,12 +63,14 @@ interface AppState {
   paperTypeId: string;
   sheetIndex: number;
   fillMode: FillMode;
+  allowRotation: boolean; // let the packer turn stickers a quarter turn to fit more on the sheet
   marginMm: number; // margin and sharp corners for the next sticker added: the last values chosen
   preserveSharpCorners: boolean;
   gapMm: number;
   sheetMarginMm: number;
   cutSpeed: number | null; // cutter speed chosen with the slider; null = the paper type's default
   cutPressure: number | null; // blade pressure chosen with the slider; null = the paper type's default
+  colorAdjust: ColorAdjust | null; // artwork brightness/contrast/saturation from the sliders; null = the paper type's default
   printCutLines: boolean; // include the red cut outlines when printing (the SVG download always has them)
   regmarksEnabled: boolean;
   regmarkStyle: "standard" | "four_corner";
@@ -77,9 +80,9 @@ interface AppState {
   camera: Camera;
   fitScale: number;
   editingSelected: boolean;
-  editingPlacementXY: { x: number; y: number } | null; // where the selected design's edited instance sits on the sheet (sheet tab only)
+  editingPlacementXY: { x: number; y: number; rotated: boolean } | null; // where the selected design's edited instance sits on the sheet (sheet tab only)
   needsRefit: boolean;
-  lastPlacements: { id: string; x: number; y: number }[];
+  lastPlacements: MixedPlacement[];
   cutter: CutterUiState;
 }
 
@@ -88,12 +91,14 @@ const state: AppState = {
   paperTypeId: PAPER_TYPES[0].id,
   sheetIndex: 0,
   fillMode: "single",
+  allowRotation: true,
   marginMm: 1,
   preserveSharpCorners: false,
   gapMm: 4,
   sheetMarginMm: 8,
   cutSpeed: null,
   cutPressure: null,
+  colorAdjust: null,
   printCutLines: false,
   regmarksEnabled: true,
   regmarkStyle: "standard",
@@ -140,13 +145,14 @@ const paperTypeGrid = document.getElementById("paperTypeGrid") as HTMLDivElement
 const sheetSelect = document.getElementById("sheetSelect") as HTMLSelectElement;
 
 const marginSlider = document.getElementById("marginSlider") as HTMLInputElement;
-const marginValue = document.getElementById("marginValue") as HTMLSpanElement;
+const marginInput = document.getElementById("marginInput") as HTMLInputElement;
 const marginForEl = document.getElementById("marginFor") as HTMLSpanElement;
 const sharpCornersToggle = document.getElementById("sharpCornersToggle") as HTMLInputElement;
 const gapInput = document.getElementById("gapInput") as HTMLInputElement;
 const gapValue = document.getElementById("gapValue") as HTMLSpanElement;
 
 const fillModeToggle = document.getElementById("fillModeToggle") as HTMLDivElement;
+const rotateToggle = document.getElementById("rotateToggle") as HTMLInputElement;
 const regmarksToggle = document.getElementById("regmarksToggle") as HTMLInputElement;
 const regmarkStyleToggle = document.getElementById("regmarkStyleToggle") as HTMLDivElement;
 
@@ -185,6 +191,14 @@ const CUTTER_DEBUG = new URLSearchParams(location.search).has("debug");
 const BT_SERIAL = ["btSerial", "btAnyPort", "btService"].some((k) => new URLSearchParams(location.search).has(k));
 const cutterErrorEl = document.getElementById("cutterError") as HTMLDivElement;
 const cutterMaterialEl = document.getElementById("cutterMaterial") as HTMLDivElement;
+const colorSliders = Object.fromEntries(
+  COLOR_ADJUST_KEYS.map((k) => [k, document.getElementById(`${k}Slider`) as HTMLInputElement])
+) as Record<(typeof COLOR_ADJUST_KEYS)[number], HTMLInputElement>;
+const colorValues = Object.fromEntries(
+  COLOR_ADJUST_KEYS.map((k) => [k, document.getElementById(`${k}Value`) as HTMLSpanElement])
+) as Record<(typeof COLOR_ADJUST_KEYS)[number], HTMLSpanElement>;
+const colorAdjustNote = document.getElementById("colorAdjustNote") as HTMLSpanElement;
+const colorAdjustResetBtn = document.getElementById("colorAdjustResetBtn") as HTMLButtonElement;
 const cutSpeedSlider = document.getElementById("cutSpeedSlider") as HTMLInputElement;
 const cutSpeedValue = document.getElementById("cutSpeedValue") as HTMLSpanElement;
 const cutSpeedDefault = document.getElementById("cutSpeedDefault") as HTMLSpanElement;
@@ -238,6 +252,7 @@ function addPaperSwatch(pt: (typeof PAPER_TYPES)[number]) {
     state.paperTypeId = pt.id;
     state.cutSpeed = null; // back to the new paper type's own speed and pressure
     state.cutPressure = null;
+    state.colorAdjust = null; // and its own colour starting point (darker for holographic)
     paperTypeGrid.querySelectorAll(".paper-swatch").forEach((el) => el.classList.toggle("active", el === btn));
     recompute();
   });
@@ -274,6 +289,11 @@ function currentCutMaterial() {
   return { ...m, speed: state.cutSpeed ?? m.speed, pressure: state.cutPressure ?? m.pressure };
 }
 
+/** Colour adjustment for the artwork: the sliders' values if moved, else the paper type's default. */
+function currentColorAdjust(): ColorAdjust {
+  return state.colorAdjust ?? currentPaperType().colorAdjust ?? NO_COLOR_ADJUST;
+}
+
 function currentPaperType() {
   return PAPER_TYPES.find((p) => p.id === state.paperTypeId) ?? PAPER_TYPES[0];
 }
@@ -297,6 +317,7 @@ function renderOptionsFor(design: StickerDesign): RenderOptions {
     borderColor: pt.exportColor,
     cutStrokeWidthMm: 0.15,
     showBorder: pt.showBorder,
+    colorAdjust: currentColorAdjust(),
   };
 }
 
@@ -320,7 +341,7 @@ function packingMarginMm(): number {
 }
 
 /** Packs the current designs onto the current sheet and resolves each placement to a renderable SheetItem. */
-function computeSheetItems(sheet: SheetSize): { placements: { id: string; x: number; y: number }[]; items: SheetItem[] } {
+function computeSheetItems(sheet: SheetSize): { placements: MixedPlacement[]; items: SheetItem[] } {
   const mixedItems = state.designs
     .filter((d) => d.design)
     .map((d) => ({ id: d.id, widthMm: d.design!.actualWmm, heightMm: d.design!.actualHmm }));
@@ -328,12 +349,12 @@ function computeSheetItems(sheet: SheetSize): { placements: { id: string; x: num
   // route packing around just those squares rather than shrinking the whole usable area from
   // every edge (see getRegmarkKeepoutRects).
   const keepouts = state.regmarksEnabled ? getRegmarkKeepoutRects(sheet.widthMm, sheet.heightMm, state.regmarkStyle === "four_corner") : [];
-  const placements = packMixedSheet(sheet, mixedItems, state.gapMm, packingMarginMm(), state.fillMode, keepouts);
+  const placements = packMixedSheet(sheet, mixedItems, state.gapMm, packingMarginMm(), state.fillMode, keepouts, state.allowRotation);
   const items: SheetItem[] = placements
     .map((p) => {
       const d = state.designs.find((dd) => dd.id === p.id);
       if (!d || !d.design) return null;
-      return { design: d.design, x: p.x, y: p.y, opts: renderOptionsFor(d) } as SheetItem;
+      return { design: d.design, x: p.x, y: p.y, rotated: p.rotated, opts: renderOptionsFor(d) } as SheetItem;
     })
     .filter((x): x is SheetItem => x !== null);
   return { placements, items };
@@ -356,15 +377,23 @@ function render() {
   // paper/sheet/margin/gap/fillMode control mirrors
   const selForMargin = selectedDesign();
   const margin = selForMargin?.marginMm ?? state.marginMm;
-  marginValue.textContent = margin.toFixed(1);
+  if (document.activeElement !== marginInput) marginInput.value = margin.toFixed(1);
   marginSlider.value = String(margin);
   sharpCornersToggle.checked = selForMargin?.preserveSharpCorners ?? state.preserveSharpCorners;
   marginForEl.textContent = selForMargin && state.designs.length > 1 ? `for ${selForMargin.fileName}` : "";
   gapValue.textContent = state.gapMm.toFixed(1);
+  const ca = currentColorAdjust();
+  for (const k of COLOR_ADJUST_KEYS) {
+    colorSliders[k].value = String(ca[k]);
+    colorValues[k].textContent = ca[k] > 0 && k !== "paleTints" ? `+${ca[k]}` : String(ca[k]);
+  }
+  colorAdjustNote.textContent = state.colorAdjust ? "(custom)" : "(Paper Type default)";
+  colorAdjustResetBtn.disabled = state.colorAdjust === null;
   sheetSelect.value = String(state.sheetIndex);
   fillModeToggle.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", (b as HTMLButtonElement).dataset.mode === state.fillMode);
   });
+  rotateToggle.checked = state.allowRotation;
   regmarksToggle.checked = state.regmarksEnabled;
   regmarkStyleToggle.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", (b as HTMLButtonElement).dataset.style === state.regmarkStyle);
@@ -412,9 +441,12 @@ function render() {
     viewportInner.innerHTML = toScreenSVG(buildSheetSVG(items, sheet, currentRegmarkStyle()));
     applyCameraTransform();
     if (state.editingSelected && sel) {
-      const match = placements.find((p) => p.id === sel.id);
+      // A repack can reorder the copies, so stay on the one nearest where the selection was.
+      const prev = state.editingPlacementXY;
+      const distSq = (p: MixedPlacement) => (prev ? (p.x - prev.x) ** 2 + (p.y - prev.y) ** 2 : 0);
+      const match = placements.filter((p) => p.id === sel.id).sort((a, b) => distSq(a) - distSq(b))[0];
       if (match) {
-        state.editingPlacementXY = { x: match.x, y: match.y };
+        state.editingPlacementXY = { x: match.x, y: match.y, rotated: match.rotated };
         renderOverlay(sel);
       } else {
         state.editingSelected = false;
@@ -562,11 +594,13 @@ window.addEventListener("resize", () => {
 let panPointerId: number | null = null;
 let panLast = { x: 0, y: 0 };
 
-function hitTestPlacement(mmX: number, mmY: number): { id: string; x: number; y: number } | null {
+function hitTestPlacement(mmX: number, mmY: number): MixedPlacement | null {
   for (const p of state.lastPlacements) {
     const d = state.designs.find((dd) => dd.id === p.id);
     if (!d || !d.design) continue;
-    if (mmX >= p.x && mmX <= p.x + d.design.actualWmm && mmY >= p.y && mmY <= p.y + d.design.actualHmm) {
+    const w = p.rotated ? d.design.actualHmm : d.design.actualWmm;
+    const h = p.rotated ? d.design.actualWmm : d.design.actualHmm;
+    if (mmX >= p.x && mmX <= p.x + w && mmY >= p.y && mmY <= p.y + h) {
       return p;
     }
   }
@@ -593,7 +627,7 @@ previewHost.addEventListener("pointerdown", (e) => {
     if (hit) {
       state.selectedDesignId = hit.id;
       state.editingSelected = true;
-      state.editingPlacementXY = { x: hit.x, y: hit.y };
+      state.editingPlacementXY = { x: hit.x, y: hit.y, rotated: hit.rotated };
       renderOverlay(selectedDesign());
       renderThumbStrip();
       return;
@@ -643,9 +677,9 @@ function renderOverlay(design: StickerDesign | null) {
   if (!state.editingSelected) return;
   if (state.activeTab === "sheet" && !state.editingPlacementXY) return;
 
-  const offset = state.activeTab === "sheet" ? state.editingPlacementXY! : { x: 0, y: 0 };
-  const w = design.design.actualWmm;
-  const h = design.design.actualHmm;
+  const offset = state.activeTab === "sheet" ? state.editingPlacementXY! : { x: 0, y: 0, rotated: false };
+  const w = offset.rotated ? design.design.actualHmm : design.design.actualWmm;
+  const h = offset.rotated ? design.design.actualWmm : design.design.actualHmm;
   const [x0, y0] = mmToScreen(state.camera, offset.x, offset.y);
   const [x1, y1] = mmToScreen(state.camera, offset.x + w, offset.y + h);
 
@@ -754,9 +788,9 @@ function startResize(e: PointerEvent, design: StickerDesign, hd: (typeof HANDLE_
   e.preventDefault();
   if (!design.design) return;
 
-  const offset = state.activeTab === "sheet" ? state.editingPlacementXY! : { x: 0, y: 0 };
-  const w0 = design.design.actualWmm;
-  const h0 = design.design.actualHmm;
+  const offset = state.activeTab === "sheet" ? state.editingPlacementXY! : { x: 0, y: 0, rotated: false };
+  const w0 = offset.rotated ? design.design.actualHmm : design.design.actualWmm;
+  const h0 = offset.rotated ? design.design.actualWmm : design.design.actualHmm;
   const anchorMm: [number, number] = [offset.x + hd.anchor[0] * w0, offset.y + hd.anchor[1] * h0];
   const originalCornerMm: [number, number] = [offset.x + hd.corner[0] * w0, offset.y + hd.corner[1] * h0];
   const originalDist = Math.hypot(originalCornerMm[0] - anchorMm[0], originalCornerMm[1] - anchorMm[1]);
@@ -800,7 +834,7 @@ function startResize(e: PointerEvent, design: StickerDesign, hd: (typeof HANDLE_
         .map((p) => {
           const d = state.designs.find((dd) => dd.id === p.id);
           if (!d || !d.design) return null;
-          return { design: d.design, x: p.x, y: p.y, opts: renderOptionsFor(d) } as SheetItem;
+          return { design: d.design, x: p.x, y: p.y, rotated: p.rotated, opts: renderOptionsFor(d) } as SheetItem;
         })
         .filter((x): x is SheetItem => x !== null);
       viewportInner.innerHTML = toScreenSVG(buildSheetSVG(items, sheetAtStart, currentRegmarkStyle()));
@@ -909,12 +943,26 @@ sheetSelect.addEventListener("change", () => {
 });
 
 // Margin and sharp corners apply to the selected sticker, and become the default for new ones.
-marginSlider.addEventListener("input", () => {
-  state.marginMm = parseFloat(marginSlider.value);
+function setMarginMm(mm: number) {
+  state.marginMm = Math.round(mm * 10) / 10; // same 0.1 mm steps as the slider
   const sel = selectedDesign();
   if (sel) sel.marginMm = state.marginMm;
   recompute();
+}
+
+marginSlider.addEventListener("input", () => setMarginMm(parseFloat(marginSlider.value)));
+
+marginInput.addEventListener("input", () => {
+  const v = parseFloat(marginInput.value);
+  if (!Number.isFinite(v) || v <= 0) return;
+  setMarginMm(clamp(v, parseFloat(marginSlider.min), parseFloat(marginSlider.max)));
 });
+// Once typing is done (Enter or leaving the box), show the stored value: clamped, one decimal.
+function syncMarginInput() {
+  marginInput.value = (selectedDesign()?.marginMm ?? state.marginMm).toFixed(1);
+}
+marginInput.addEventListener("change", syncMarginInput);
+marginInput.addEventListener("blur", syncMarginInput);
 
 sharpCornersToggle.addEventListener("change", () => {
   state.preserveSharpCorners = sharpCornersToggle.checked;
@@ -932,6 +980,11 @@ fillModeToggle.addEventListener("click", (e) => {
   const btn = (e.target as HTMLElement).closest("button[data-mode]") as HTMLButtonElement | null;
   if (!btn) return;
   state.fillMode = btn.dataset.mode as FillMode;
+  recompute();
+});
+
+rotateToggle.addEventListener("change", () => {
+  state.allowRotation = rotateToggle.checked;
   recompute();
 });
 
@@ -959,34 +1012,65 @@ tabs.forEach((tab) => {
 });
 
 // ---- export ----
+/**
+ * Print/export version of an item: the colour adjustment baked into a high-resolution PNG instead
+ * of a live SVG filter, so the printer and other SVG tools get the adjusted pixels at full DPI.
+ */
+async function bakedItem(item: SheetItem): Promise<SheetItem> {
+  const a = item.opts.colorAdjust;
+  if (!a || isNoColorAdjust(a)) return item;
+  const { width, height } = item.design.imagePlacementMM;
+  const imageDataUrl = await bakeColorAdjust(item.opts.imageDataUrl, a, width, height);
+  return { ...item, opts: { ...item.opts, imageDataUrl, colorAdjust: undefined } };
+}
+
+/** Builds the SVG for printing/export of whatever the active tab shows, with baked colour. */
+async function buildOutputSVG(includeCutLines: boolean): Promise<string | null> {
+  const sheet = currentSheet();
+  if (state.activeTab === "design") {
+    const sel = selectedDesign();
+    if (!sel?.design) return null;
+    const { opts } = await bakedItem({ design: sel.design, x: 0, y: 0, opts: renderOptionsFor(sel) });
+    return buildSingleStickerSVG(sel.design, opts, includeCutLines);
+  }
+  const { items } = computeSheetItems(sheet);
+  return buildSheetSVG(await Promise.all(items.map(bakedItem)), sheet, currentRegmarkStyle(), includeCutLines);
+}
+
+/** Runs a print/export, disabling its button while artwork is being baked (it can take a moment). */
+async function withBusyButton(btn: HTMLButtonElement, fn: () => Promise<void>) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Preparing…";
+  try {
+    await fn();
+  } catch (e) {
+    console.error(e);
+    alert(`Couldn't prepare the artwork: ${e instanceof Error ? e.message : e}`);
+  } finally {
+    btn.textContent = label;
+    btn.disabled = false;
+  }
+}
+
 function baseName(): string {
   const sel = selectedDesign();
   return (sel?.fileName || "sticker").replace(/\.[^.]+$/, "");
 }
 
-downloadSvgBtn.addEventListener("click", () => {
-  const sheet = currentSheet();
-  if (state.activeTab === "design") {
-    const sel = selectedDesign();
-    if (!sel?.design) return;
-    downloadSvgString(buildSingleStickerSVG(sel.design, renderOptionsFor(sel)), `${baseName()}-cut.svg`);
-  } else {
-    const { items } = computeSheetItems(sheet);
-    downloadSvgString(buildSheetSVG(items, sheet, currentRegmarkStyle()), `stickers-sheet.svg`);
-  }
-});
+downloadSvgBtn.addEventListener("click", () =>
+  withBusyButton(downloadSvgBtn, async () => {
+    const svg = await buildOutputSVG(true);
+    if (svg) downloadSvgString(svg, state.activeTab === "design" ? `${baseName()}-cut.svg` : `stickers-sheet.svg`);
+  })
+);
 
-printBtn.addEventListener("click", () => {
-  const sheet = currentSheet();
-  if (state.activeTab === "design") {
-    const sel = selectedDesign();
-    if (!sel?.design) return;
-    printSvg(buildSingleStickerSVG(sel.design, renderOptionsFor(sel), state.printCutLines));
-  } else {
-    const { items } = computeSheetItems(sheet);
-    printSvg(buildSheetSVG(items, sheet, currentRegmarkStyle(), state.printCutLines));
-  }
-});
+printBtn.addEventListener("click", () =>
+  withBusyButton(printBtn, async () => {
+    const svg = await buildOutputSVG(state.printCutLines);
+    if (svg) printSvg(svg);
+  })
+);
 
 printCutLinesToggle.addEventListener("change", () => {
   state.printCutLines = printCutLinesToggle.checked;
@@ -1325,6 +1409,20 @@ cutterDialogConnectBtn.addEventListener("click", () => {
 cutterDialogDisconnectBtn.addEventListener("click", () => void disconnectCutter());
 
 cutterTestBtn.addEventListener("click", () => void runCutterJob("test"));
+
+for (const k of COLOR_ADJUST_KEYS) {
+  colorSliders[k].addEventListener("input", () => {
+    const next = { ...currentColorAdjust(), [k]: parseInt(colorSliders[k].value, 10) };
+    const def = currentPaperType().colorAdjust ?? NO_COLOR_ADJUST;
+    const same = COLOR_ADJUST_KEYS.every((key) => next[key] === def[key]);
+    state.colorAdjust = same ? null : next;
+    render(); // colour only changes the SVG filter, no re-trace needed
+  });
+}
+colorAdjustResetBtn.addEventListener("click", () => {
+  state.colorAdjust = null;
+  render();
+});
 
 cutSpeedSlider.addEventListener("input", () => {
   const speed = parseInt(cutSpeedSlider.value, 10);

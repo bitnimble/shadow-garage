@@ -1,8 +1,8 @@
 // Turns the packed sheet (the same SheetItem[] the SVG/PDF export uses) into cutter-ready paths,
 // and works out where those paths land on the device.
 
-import type { DesignResult } from "../design";
-import { translateContours, type Contour, type Point } from "../geometry";
+import { placedCutContours, type DesignResult } from "../design";
+import type { Contour, Point } from "../geometry";
 import { regmarkLayout } from "../regmarks";
 import type { SheetSize } from "../sheet";
 import type { CutterModel } from "./models";
@@ -22,6 +22,7 @@ export interface PlacedDesign {
   design: DesignResult;
   x: number;
   y: number;
+  rotated?: boolean;
 }
 
 function dist(a: Point, b: Point): number {
@@ -92,7 +93,7 @@ export function orderPaths(contours: Contour[], start: Point = [0, 0]): Contour[
 
 /** Sheet-space cut paths for every placed sticker, ordered and closed with an overcut. */
 export function buildCutPaths(items: PlacedDesign[], overcutMm = DEFAULT_OVERCUT_MM): Contour[] {
-  const contours = items.flatMap((it) => translateContours(it.design.cutContoursMM, it.x, it.y));
+  const contours = items.flatMap((it) => placedCutContours(it.design, it.x, it.y, it.rotated));
   return orderPaths(contours).map((c) => closeWithOvercut(c, overcutMm));
 }
 

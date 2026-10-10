@@ -1,5 +1,6 @@
-import type { DesignResult } from "./design";
-import { contoursToPathD, translateContours } from "./geometry";
+import { placedCutContours, type DesignResult } from "./design";
+import { contoursToPathD } from "./geometry";
+import { colorAdjustFilter, colorAdjustId, isNoColorAdjust, type ColorAdjust } from "./colorAdjust";
 import { buildRegmarksSVG } from "./regmarks";
 import type { SheetSize } from "./sheet";
 
@@ -10,21 +11,34 @@ export interface RenderOptions {
   borderColor: string; // fill shown in the margin between artwork edge and cut line (driven by the selected paper type)
   cutStrokeWidthMm: number;
   showBorder: boolean;
+  /** Live SVG filter on the artwork only (preview). Print/export pass pre-baked artwork instead; see colorAdjust.ts. */
+  colorAdjust?: ColorAdjust;
 }
 
-/** Markup for a single sticker (border fill + image + cut outline), translated so its own bbox origin sits at (x, y). */
-function stickerGroup(design: DesignResult, x: number, y: number, opts: RenderOptions, index: number): { print: string; cut: string } {
-  const contours = translateContours(design.cutContoursMM, x, y);
-  const d = contoursToPathD(contours);
+/** <defs> holding one filter per distinct colour adjustment in use, or "" when none is. */
+function colorAdjustDefs(opts: RenderOptions[]): string {
+  const filters = new Map<string, string>();
+  for (const o of opts) if (o.colorAdjust && !isNoColorAdjust(o.colorAdjust)) filters.set(colorAdjustId(o.colorAdjust), colorAdjustFilter(o.colorAdjust));
+  return filters.size ? `<defs>${[...filters.values()].join("")}</defs>` : "";
+}
+
+/**
+ * Markup for a single sticker (border fill + image + cut outline), translated so its bbox origin
+ * sits at (x, y). `rotated` turns it a quarter turn clockwise within that bbox.
+ */
+function stickerGroup(design: DesignResult, x: number, y: number, opts: RenderOptions, index: number, rotated = false): { print: string; cut: string } {
+  const d = contoursToPathD(placedCutContours(design, x, y, rotated));
   const img = design.imagePlacementMM;
 
   const printParts: string[] = [];
   if (opts.showBorder) {
     printParts.push(`<path d="${d}" fill="${opts.borderColor}" fill-rule="evenodd"/>`);
   }
-  printParts.push(
-    `<image href="${opts.imageDataUrl}" x="${(x + img.x).toFixed(3)}" y="${(y + img.y).toFixed(3)}" width="${img.width.toFixed(3)}" height="${img.height.toFixed(3)}" preserveAspectRatio="none"/>`
-  );
+  // The cut path above is rotated point by point; the raster gets the same quarter turn as a transform.
+  const [ix, iy] = rotated ? [img.x, img.y] : [x + img.x, y + img.y];
+  const filter = opts.colorAdjust && !isNoColorAdjust(opts.colorAdjust) ? ` filter="url(#${colorAdjustId(opts.colorAdjust)})"` : "";
+  const image = `<image href="${opts.imageDataUrl}" x="${ix.toFixed(3)}" y="${iy.toFixed(3)}" width="${img.width.toFixed(3)}" height="${img.height.toFixed(3)}" preserveAspectRatio="none"${filter}/>`;
+  printParts.push(rotated ? `<g transform="translate(${(x + design.actualHmm).toFixed(3)} ${y.toFixed(3)}) rotate(90)">${image}</g>` : image);
 
   const cut = `<path id="cut-${index}" d="${d}" fill="none" stroke="${CUT_LINE_COLOR}" stroke-width="${opts.cutStrokeWidthMm}"/>`;
 
@@ -41,6 +55,7 @@ export function buildSingleStickerSVG(design: DesignResult, opts: RenderOptions,
   const { print, cut } = stickerGroup(design, 0, 0, opts, 0);
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}mm" height="${h}mm" viewBox="0 0 ${w} ${h}">`,
+    colorAdjustDefs([opts]),
     `<g id="print">${print}</g>`,
     includeCutLines ? `<g id="cutlines">${cut}</g>` : "",
     `</svg>`,
@@ -51,6 +66,7 @@ export interface SheetItem {
   design: DesignResult;
   x: number;
   y: number;
+  rotated?: boolean; // turned a quarter turn clockwise by the packer
   opts: RenderOptions;
 }
 
@@ -67,12 +83,13 @@ export function buildSheetSVG(
   const prints: string[] = [];
   const cuts: string[] = [];
   items.forEach((item, i) => {
-    const { print, cut } = stickerGroup(item.design, item.x, item.y, item.opts, i);
+    const { print, cut } = stickerGroup(item.design, item.x, item.y, item.opts, i, item.rotated);
     prints.push(print);
     cuts.push(cut);
   });
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${sheet.widthMm}mm" height="${sheet.heightMm}mm" viewBox="0 0 ${sheet.widthMm} ${sheet.heightMm}">`,
+    colorAdjustDefs(items.map((i) => i.opts)),
     `<rect x="0" y="0" width="${sheet.widthMm}" height="${sheet.heightMm}" class="sheet-paper" fill="white"/>`,
     `<g id="print">${prints.join("")}</g>`,
     includeCutLines ? `<g id="cutlines">${cuts.join("")}</g>` : "",

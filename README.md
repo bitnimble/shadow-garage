@@ -1,11 +1,19 @@
+<p align="center">
+  <img src=".github/assets/logo.png" alt="Shadow Garage logo: a Silhouette Cameo cutting a sheet of stickers" width="160">
+</p>
+
 # Shadow Garage
+
+*The self-hostable Silhouette Studio alternative — print-and-cut stickers, straight from your browser.*
 
 **🔗 Live app: [https://spuder.github.io/shadow-garage/](https://spuder.github.io/shadow-garage/)**
 
-A web app for turning a logo, wordmark, or image into a print-and-cut sticker file. It
-auto-traces a die-cut outline around your artwork and exports a ready-to-cut SVG — with real
-Silhouette-style registration marks baked in — that you can print directly from the browser or
-send on to whatever actually drives your plotter.
+Shadow Garage is the self-hostable, open-source alternative to Silhouette Studio for
+print-and-cut stickers. It's a browser-only web app — static files, no backend, no install — that
+turns a logo, wordmark, or image into a sticker sheet: it auto-traces a die-cut outline around
+your artwork, packs the stickers onto a page with real Silhouette-style registration marks,
+prints from the browser, and cuts on a Silhouette Cameo 3 directly over USB or Bluetooth. Use the
+hosted copy above, or build it and serve it yourself.
 
 ## Why this exists
 
@@ -19,11 +27,12 @@ choosing between two bad options:
   extension** is free and open source, but notoriously fiddly to get working: Python environment
   issues, USB/driver quirks, and an extension UI with plenty of rough edges.
 
-Shadow Garage doesn't try to replace either of those. It just handles the one part that's
-genuinely annoying to get right — turning an arbitrary image into a correctly-sized,
-correctly-registered cut file — entirely in the browser, with no install. The resulting SVG
-(marks included) is then handed off to whichever cutting path you've already got working:
-imported into Silhouette Studio, sent straight to the plotter with
+Shadow Garage replaces both for the sticker workflow. It handles the part that's genuinely
+annoying to get right — turning an arbitrary image into a correctly-sized, correctly-registered
+cut — entirely in the browser, with no install, and then drives the cutter itself over WebUSB or
+Web Bluetooth (Chrome or Edge). It isn't a general-purpose design tool, and the Cameo 3 is the
+only machine it cuts on so far. For anything else, download the SVG (marks included) and hand it
+to whichever cutting path you've already got working: Silhouette Studio,
 [Plottie](https://github.com/mossblaser/plottie) (a command-line tool that cuts/plots an SVG on a
 Silhouette machine directly — no Silhouette Studio or Inkscape required, and it auto-detects
 registration marks), or any other script that talks to the cutter.
@@ -50,6 +59,8 @@ registration marks), or any other script that talks to the cutter.
   placement automatically kept clear of the marks so nothing overlaps or obscures them.
 - **Print directly** to your system print dialog at true physical size, or **download the SVG**
   for use elsewhere.
+- **Cut directly on a Silhouette Cameo 3** over USB or Bluetooth from Chrome or Edge — see
+  [docs/cutter-setup.md](docs/cutter-setup.md).
 - Paper types (White sticker / Clear sticker / 20 lb printer paper), each with its own cut
   settings, and a dark/light theme.
 

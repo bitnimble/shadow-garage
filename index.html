@@ -91,16 +91,42 @@
             </div>
 
             <div class="panel-block">
+              <div class="block-title">Color Adjust <span id="colorAdjustNote" class="block-title-note"></span></div>
+              <label class="field-label">
+                Brightness: <span id="brightnessValue">0</span>
+                <input id="brightnessSlider" type="range" min="-60" max="40" step="1" value="0" />
+              </label>
+              <label class="field-label">
+                Pale tints: <span id="paleTintsValue">0</span>
+                <input id="paleTintsSlider" type="range" min="0" max="100" step="1" value="0" />
+              </label>
+              <label class="field-label">
+                Contrast: <span id="contrastValue">0</span>
+                <input id="contrastSlider" type="range" min="-50" max="50" step="1" value="0" />
+              </label>
+              <label class="field-label">
+                Saturation: <span id="saturationValue">0</span>
+                <input id="saturationSlider" type="range" min="-100" max="100" step="1" value="0" />
+              </label>
+              <button id="colorAdjustResetBtn" class="btn-secondary small" type="button" style="margin-top: 6px;">Reset to Paper Type</button>
+              <div class="hint-text">Applied to the artwork in the preview, print and SVG export. Inkjet ink is see-through on holographic and clear stock, so pale colors barely show. Pale tints darkens light colors while leaving dark ones mostly alone; Brightness darkens everything.</div>
+            </div>
+
+            <div class="panel-block">
               <div class="block-title">Paper Size</div>
               <select id="sheetSelect"></select>
             </div>
 
             <div class="panel-block">
               <div class="block-title">Offset Margin <span id="marginFor" class="block-title-note"></span></div>
-              <label class="field-label">
-                Space around artwork: <span id="marginValue">1.0</span> mm
-                <input id="marginSlider" type="range" min="0.2" max="10" step="0.1" value="1" />
-              </label>
+              <div class="field-label">
+                <label class="field-inline">
+                  Space around artwork:
+                  <input id="marginInput" type="number" min="0.2" max="10" step="0.1" value="1.0" />
+                  mm
+                </label>
+                <input id="marginSlider" type="range" min="0.2" max="10" step="0.1" value="1" aria-label="Space around artwork (mm)" />
+              </div>
               <label class="checkbox-row" style="margin-top: 10px;">
                 <input id="sharpCornersToggle" type="checkbox" />
                 Preserve sharp corners
@@ -118,6 +144,10 @@
                 Gap between stickers: <span id="gapValue">4.0</span> mm
                 <input id="gapInput" type="range" min="0" max="20" step="0.5" value="4" />
               </div>
+              <label class="checkbox-row" style="margin-top: 10px;">
+                <input id="rotateToggle" type="checkbox" checked />
+                Rotate stickers to fit more
+              </label>
             </div>
 
             <div class="panel-block">
