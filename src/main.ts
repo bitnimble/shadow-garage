@@ -2,7 +2,7 @@ import "./style.css";
 import { extractAlphaMask, type RawMask } from "./lib/trace";
 import { computeDesign, type DesignResult } from "./lib/design";
 import { SHEET_SIZES, packMixedSheet, type MixedPlacement, type SheetSize } from "./lib/sheet";
-import { buildSingleStickerSVG, buildSheetSVG, type RenderOptions, type SheetItem } from "./lib/svgBuilder";
+import { buildSingleStickerSVG, buildSheetSVG, NO_COLOR_ADJUST, type ColorAdjust, type RenderOptions, type SheetItem } from "./lib/svgBuilder";
 import { getRegmarkKeepoutRects, REGMARK_ORIGIN_MM } from "./lib/regmarks";
 import { downloadSvgString } from "./lib/download";
 import { printSvg } from "./lib/print";
@@ -69,6 +69,7 @@ interface AppState {
   sheetMarginMm: number;
   cutSpeed: number | null; // cutter speed chosen with the slider; null = the paper type's default
   cutPressure: number | null; // blade pressure chosen with the slider; null = the paper type's default
+  colorAdjust: ColorAdjust | null; // artwork brightness/contrast/saturation from the sliders; null = the paper type's default
   printCutLines: boolean; // include the red cut outlines when printing (the SVG download always has them)
   regmarksEnabled: boolean;
   regmarkStyle: "standard" | "four_corner";
@@ -96,6 +97,7 @@ const state: AppState = {
   sheetMarginMm: 8,
   cutSpeed: null,
   cutPressure: null,
+  colorAdjust: null,
   printCutLines: false,
   regmarksEnabled: true,
   regmarkStyle: "standard",
@@ -188,6 +190,15 @@ const CUTTER_DEBUG = new URLSearchParams(location.search).has("debug");
 const BT_SERIAL = ["btSerial", "btAnyPort", "btService"].some((k) => new URLSearchParams(location.search).has(k));
 const cutterErrorEl = document.getElementById("cutterError") as HTMLDivElement;
 const cutterMaterialEl = document.getElementById("cutterMaterial") as HTMLDivElement;
+const COLOR_ADJUST_KEYS = ["brightness", "contrast", "saturation"] as const;
+const colorSliders = Object.fromEntries(
+  COLOR_ADJUST_KEYS.map((k) => [k, document.getElementById(`${k}Slider`) as HTMLInputElement])
+) as Record<(typeof COLOR_ADJUST_KEYS)[number], HTMLInputElement>;
+const colorValues = Object.fromEntries(
+  COLOR_ADJUST_KEYS.map((k) => [k, document.getElementById(`${k}Value`) as HTMLSpanElement])
+) as Record<(typeof COLOR_ADJUST_KEYS)[number], HTMLSpanElement>;
+const colorAdjustNote = document.getElementById("colorAdjustNote") as HTMLSpanElement;
+const colorAdjustResetBtn = document.getElementById("colorAdjustResetBtn") as HTMLButtonElement;
 const cutSpeedSlider = document.getElementById("cutSpeedSlider") as HTMLInputElement;
 const cutSpeedValue = document.getElementById("cutSpeedValue") as HTMLSpanElement;
 const cutSpeedDefault = document.getElementById("cutSpeedDefault") as HTMLSpanElement;
@@ -241,6 +252,7 @@ function addPaperSwatch(pt: (typeof PAPER_TYPES)[number]) {
     state.paperTypeId = pt.id;
     state.cutSpeed = null; // back to the new paper type's own speed and pressure
     state.cutPressure = null;
+    state.colorAdjust = null; // and its own colour starting point (darker for holographic)
     paperTypeGrid.querySelectorAll(".paper-swatch").forEach((el) => el.classList.toggle("active", el === btn));
     recompute();
   });
@@ -277,6 +289,11 @@ function currentCutMaterial() {
   return { ...m, speed: state.cutSpeed ?? m.speed, pressure: state.cutPressure ?? m.pressure };
 }
 
+/** Colour adjustment for the artwork: the sliders' values if moved, else the paper type's default. */
+function currentColorAdjust(): ColorAdjust {
+  return state.colorAdjust ?? currentPaperType().colorAdjust ?? NO_COLOR_ADJUST;
+}
+
 function currentPaperType() {
   return PAPER_TYPES.find((p) => p.id === state.paperTypeId) ?? PAPER_TYPES[0];
 }
@@ -300,6 +317,7 @@ function renderOptionsFor(design: StickerDesign): RenderOptions {
     borderColor: pt.exportColor,
     cutStrokeWidthMm: 0.15,
     showBorder: pt.showBorder,
+    colorAdjust: currentColorAdjust(),
   };
 }
 
@@ -364,6 +382,13 @@ function render() {
   sharpCornersToggle.checked = selForMargin?.preserveSharpCorners ?? state.preserveSharpCorners;
   marginForEl.textContent = selForMargin && state.designs.length > 1 ? `for ${selForMargin.fileName}` : "";
   gapValue.textContent = state.gapMm.toFixed(1);
+  const ca = currentColorAdjust();
+  for (const k of COLOR_ADJUST_KEYS) {
+    colorSliders[k].value = String(ca[k]);
+    colorValues[k].textContent = ca[k] > 0 ? `+${ca[k]}` : String(ca[k]);
+  }
+  colorAdjustNote.textContent = state.colorAdjust ? "(custom)" : "(Paper Type default)";
+  colorAdjustResetBtn.disabled = state.colorAdjust === null;
   sheetSelect.value = String(state.sheetIndex);
   fillModeToggle.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", (b as HTMLButtonElement).dataset.mode === state.fillMode);
@@ -1348,6 +1373,20 @@ cutterDialogConnectBtn.addEventListener("click", () => {
 cutterDialogDisconnectBtn.addEventListener("click", () => void disconnectCutter());
 
 cutterTestBtn.addEventListener("click", () => void runCutterJob("test"));
+
+for (const k of COLOR_ADJUST_KEYS) {
+  colorSliders[k].addEventListener("input", () => {
+    const next = { ...currentColorAdjust(), [k]: parseInt(colorSliders[k].value, 10) };
+    const def = currentPaperType().colorAdjust ?? NO_COLOR_ADJUST;
+    const same = COLOR_ADJUST_KEYS.every((key) => next[key] === def[key]);
+    state.colorAdjust = same ? null : next;
+    render(); // colour only changes the SVG filter, no re-trace needed
+  });
+}
+colorAdjustResetBtn.addEventListener("click", () => {
+  state.colorAdjust = null;
+  render();
+});
 
 cutSpeedSlider.addEventListener("input", () => {
   const speed = parseInt(cutSpeedSlider.value, 10);
