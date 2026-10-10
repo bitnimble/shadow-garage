@@ -152,6 +152,19 @@ describe("Cameo 4 command sequences", () => {
     vi.useRealTimers();
     expect(t.log.at(-1)).toBe("TF1,1");
   });
+
+  it("only sets the AutoBlade depth when holder 1 has an AutoBlade or reads empty", async () => {
+    const lastSent = async (toolSetup: string) => {
+      const cutter = cameo3Responder();
+      const t = new FakeTransport((written) => (written === "\x1b\x15" ? toolSetup : cutter(written)));
+      await new GraphtecProtocol(t, cameo4).setup(STICKER_PAPER);
+      return t.log.at(-1);
+    };
+    expect(await lastSent(" 2, 0\x03")).toBe("TF1,1"); // AutoBlade
+    expect(await lastSent(" 0, 0\x03")).toBe("TF1,1"); // empty
+    expect(await lastSent(" 1, 0\x03")).toBe("FC18,1,1"); // ratchet blade
+    expect(await lastSent(" 7, 2\x03")).toBe("FC18,1,1"); // pen, with an AutoBlade in holder 2
+  });
 });
 
 describe("waiting for the cutter", () => {

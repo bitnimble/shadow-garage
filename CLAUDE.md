@@ -90,7 +90,7 @@ hardware evidence:
 
 - `fakeTransport.ts` provides `FakeTransport` and `cameo3Responder`, a scripted device used by the
   session tests.
-- `graphtec.test.ts` includes golden tests (Cameo 3 and 4) that compare the full command stream with
+- `session.test.ts` includes golden tests (Cameo 3 and 4) that compare the full command stream with
   inkscape-silhouette's dry-run transcript. If you change command output, keep them passing or
   update them deliberately.
 

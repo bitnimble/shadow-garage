@@ -4,7 +4,7 @@
 import type { Contour } from "../geometry";
 import { GraphtecProtocol } from "./graphtec";
 import type { CutMaterial } from "./materials";
-import type { CutterModel } from "./models";
+import { manualRegmarkOffsetMm, type CutterModel } from "./models";
 import { RegmarkNotFoundError, type CutFrame, type CutterProtocol, type CutterStatus, type RegmarkSpec } from "./protocol";
 import { boundingBox, simplify } from "../geometry";
 import { LoggingTransport, type Transport } from "./transport";
@@ -186,7 +186,7 @@ export class CutterSession {
         events.onPhase?.("manualRegmarks");
         await this.protocol.prepareManualRegmarks(job.regmarks);
         await events.onManualRegistration(
-          new JogController(this.protocol, this.model, job.regmarks.originXmm, job.regmarks.originYmm + this.model.regmarkScanOffsetMm)
+          new JogController(this.protocol, this.model, job.regmarks.originXmm, job.regmarks.originYmm + manualRegmarkOffsetMm(this.model))
         );
         signal?.throwIfAborted();
         events.onPhase?.("regmarks");

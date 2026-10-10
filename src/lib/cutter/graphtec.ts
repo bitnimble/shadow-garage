@@ -11,7 +11,7 @@
 
 import type { Contour } from "../geometry";
 import type { CutMaterial } from "./materials";
-import type { CutterModel, RegmarkArgOrder } from "./models";
+import { manualRegmarkOffsetMm, type CutterModel, type RegmarkArgOrder } from "./models";
 import {
   CutOutOfBoundsError,
   CutterCancelledError,
@@ -34,6 +34,9 @@ const NAK = 0x15; // ESC NAK: tool setup query (Cameo 4)
 
 const SU_PER_MM = 20;
 const TOOL_HOLDER = 1; // the AutoBlade only works in tool holder 1
+// Tool types in a Cameo 4's tool setup reply (Graphtec.py SILHOUETTE_CAMEO4_TOOL_*).
+const TOOL_EMPTY = 0;
+const TOOL_AUTOBLADE = 2;
 const BLADE_DIAMETER_MM = 0.9;
 const CLIP_FUZZ_MM = 0.05; // one device step; points this close outside the clip box are fine
 const MAX_CHUNK_BYTES = 1024; // Silhouette Studio's default packet size; upstream's safe_write uses the same
@@ -326,17 +329,22 @@ export class GraphtecProtocol implements CutterProtocol {
   async setup(material: CutMaterial): Promise<void> {
     const cmds = setupCommands(this.model, material);
     if (this.model.gpglVariant !== "cameo4") return this.send(cmds);
-    // Upstream's tool setup query sits between the mat and tool commands; the reply isn't used.
+    // Upstream's tool setup query sits between the mat and tool commands.
     const matLength = matCommands(this.model).length;
     await this.send(cmds.slice(0, matLength));
     this.drain();
     await this.transport.write(escapeCommand(NAK));
+    let tool = NaN; // unknown: no reply, or one that doesn't parse
     try {
-      await this.readReply(1000);
+      tool = parseInt((await this.readReply(1000)).split(",")[TOOL_HOLDER - 1], 10);
     } catch (e) {
       if (!(e instanceof TransportTimeoutError)) throw e;
     }
-    await this.send(cmds.slice(matLength));
+    // Like upstream, only set the AutoBlade depth when the holder reports an AutoBlade, reads empty
+    // or is unknown: TF makes the carriage tap the blade down, which is no good for a pen or a
+    // ratchet blade.
+    const otherTool = !Number.isNaN(tool) && tool !== TOOL_AUTOBLADE && tool !== TOOL_EMPTY;
+    await this.send(cmds.slice(matLength).filter((c) => !(otherTool && c.startsWith("TF"))));
   }
 
   private async awaitRegistration(): Promise<void> {
@@ -358,7 +366,7 @@ export class GraphtecProtocol implements CutterProtocol {
 
   async prepareManualRegmarks(spec: RegmarkSpec): Promise<void> {
     await this.send(REGMARK_SETUP);
-    await this.moveTo(spec.originXmm, spec.originYmm + this.model.regmarkScanOffsetMm);
+    await this.moveTo(spec.originXmm, spec.originYmm + manualRegmarkOffsetMm(this.model));
   }
 
   async moveTo(xMm: number, yMm: number): Promise<void> {

@@ -304,6 +304,19 @@ describe("manual registration", () => {
     expect(log.indexOf("TB23,5188,3918")).toBeLessThan(log.indexOf("M600,600"));
   });
 
+  it("starts at the Cameo 3's scan offset, and on the corner for a Cameo 4", async () => {
+    const startOf = async (model: typeof cameo3) => {
+      const cutter = cameo3Responder();
+      const t = new FakeTransport((w) => (/TB23,[^\x03]*\x03$/.test(w) ? FOUND : cutter(w)));
+      const session = await CutterSession.open(t, model);
+      let start: number[] = [];
+      await session.run({ ...job(true), registration: "manual" }, { onManualRegistration: async (jog) => void (start = [jog.x, jog.y]) });
+      return { start, firstMove: t.log[t.log.indexOf("TB55,1") + 1] };
+    };
+    expect(await startOf(cameo3)).toEqual({ start: [10, 13], firstMove: "M260,200" });
+    expect(await startOf(cameo4)).toEqual({ start: [10, 10], firstMove: "M200,200" });
+  });
+
   it("cuts nothing when cancelled", async () => {
     const t = new FakeTransport(cameo3Responder());
     const session = await CutterSession.open(t, cameo3);

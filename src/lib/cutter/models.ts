@@ -140,6 +140,15 @@ export function bluetoothServiceClassIds(): string[] {
   return [...new Set(CUTTER_MODELS.flatMap((m) => (m.bluetooth ? [m.bluetooth.rfcommServiceClassId] : [])))];
 }
 
+/**
+ * How far below the top-left mark's corner (mm) manual registration parks the tool before the user
+ * jogs it. Where the search starts above the mark, the scan offset is a nudge and applies here too;
+ * where it's there to clear the square (a Cameo 4's margin of 0), the tool starts on the corner.
+ */
+export function manualRegmarkOffsetMm(model: CutterModel): number {
+  return model.regmarkSearchMarginMm > 0 ? model.regmarkScanOffsetMm : 0;
+}
+
 /** The model a Bluetooth handshake starts with, before the firmware reply identifies the real one. */
 export function provisionalBluetoothModel(): CutterModel | undefined {
   return CUTTER_MODELS.find((m) => m.bluetooth);
