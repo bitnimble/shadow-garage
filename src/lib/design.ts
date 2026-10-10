@@ -1,5 +1,5 @@
 import type { Contour } from "./geometry";
-import { boundingBox, scaleContours, translateContours } from "./geometry";
+import { boundingBox, rotateContoursQuarterTurn, scaleContours, translateContours } from "./geometry";
 import { computeCutPath, type RawMask } from "./trace";
 
 export interface DesignResult {
@@ -102,4 +102,14 @@ export function computeDesign(
     actualWmm,
     actualHmm,
   };
+}
+
+/**
+ * A design's cut contours as placed on a sheet, with the placed bounding box's top-left at (x, y).
+ * `rotated` turns the sticker a quarter turn clockwise first. The SVG and the cutter both use
+ * this, so what's cut always matches what's drawn.
+ */
+export function placedCutContours(design: DesignResult, x: number, y: number, rotated = false): Contour[] {
+  const contours = rotated ? rotateContoursQuarterTurn(design.cutContoursMM, design.actualHmm) : design.cutContoursMM;
+  return translateContours(contours, x, y);
 }

@@ -33,7 +33,9 @@ step. Vite's `base` is `/shadow-garage/`, so the dev URL is
   as separate letters), labels connected components, traces boundaries and smooths them. Interior
   holes are intentionally left uncut.
 - `design.ts` fits the contours to the requested physical size exactly.
-- `sheet.ts` packs stickers (`packMixedSheet`) around keep-out rects.
+- `sheet.ts` packs stickers (`packMixedSheet`) around keep-out rects. It tries several layouts
+  (shelves, then max-rects strategies) and keeps the fullest. A placement may be `rotated` a
+  quarter turn; `placedCutContours()` in `design.ts` applies that for both the SVG and the cutter.
 - `regmarks.ts` is the single source of truth for mark geometry. `regmarkLayout()` is used both to
   draw the marks and by the cutter's mark search, so the two must never diverge.
 - `svgBuilder.ts` renders the SVG. Print artwork and red cut lines are kept in separate groups,

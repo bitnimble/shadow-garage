@@ -1,5 +1,5 @@
-import type { DesignResult } from "./design";
-import { contoursToPathD, translateContours } from "./geometry";
+import { placedCutContours, type DesignResult } from "./design";
+import { contoursToPathD } from "./geometry";
 import { buildRegmarksSVG } from "./regmarks";
 import type { SheetSize } from "./sheet";
 
@@ -12,19 +12,22 @@ export interface RenderOptions {
   showBorder: boolean;
 }
 
-/** Markup for a single sticker (border fill + image + cut outline), translated so its own bbox origin sits at (x, y). */
-function stickerGroup(design: DesignResult, x: number, y: number, opts: RenderOptions, index: number): { print: string; cut: string } {
-  const contours = translateContours(design.cutContoursMM, x, y);
-  const d = contoursToPathD(contours);
+/**
+ * Markup for a single sticker (border fill + image + cut outline), translated so its bbox origin
+ * sits at (x, y). `rotated` turns it a quarter turn clockwise within that bbox.
+ */
+function stickerGroup(design: DesignResult, x: number, y: number, opts: RenderOptions, index: number, rotated = false): { print: string; cut: string } {
+  const d = contoursToPathD(placedCutContours(design, x, y, rotated));
   const img = design.imagePlacementMM;
 
   const printParts: string[] = [];
   if (opts.showBorder) {
     printParts.push(`<path d="${d}" fill="${opts.borderColor}" fill-rule="evenodd"/>`);
   }
-  printParts.push(
-    `<image href="${opts.imageDataUrl}" x="${(x + img.x).toFixed(3)}" y="${(y + img.y).toFixed(3)}" width="${img.width.toFixed(3)}" height="${img.height.toFixed(3)}" preserveAspectRatio="none"/>`
-  );
+  // The cut path above is rotated point by point; the raster gets the same quarter turn as a transform.
+  const [ix, iy] = rotated ? [img.x, img.y] : [x + img.x, y + img.y];
+  const image = `<image href="${opts.imageDataUrl}" x="${ix.toFixed(3)}" y="${iy.toFixed(3)}" width="${img.width.toFixed(3)}" height="${img.height.toFixed(3)}" preserveAspectRatio="none"/>`;
+  printParts.push(rotated ? `<g transform="translate(${(x + design.actualHmm).toFixed(3)} ${y.toFixed(3)}) rotate(90)">${image}</g>` : image);
 
   const cut = `<path id="cut-${index}" d="${d}" fill="none" stroke="${CUT_LINE_COLOR}" stroke-width="${opts.cutStrokeWidthMm}"/>`;
 
@@ -51,6 +54,7 @@ export interface SheetItem {
   design: DesignResult;
   x: number;
   y: number;
+  rotated?: boolean; // turned a quarter turn clockwise by the packer
   opts: RenderOptions;
 }
 
@@ -67,7 +71,7 @@ export function buildSheetSVG(
   const prints: string[] = [];
   const cuts: string[] = [];
   items.forEach((item, i) => {
-    const { print, cut } = stickerGroup(item.design, item.x, item.y, item.opts, i);
+    const { print, cut } = stickerGroup(item.design, item.x, item.y, item.opts, i, item.rotated);
     prints.push(print);
     cuts.push(cut);
   });

@@ -1,7 +1,7 @@
 import "./style.css";
 import { extractAlphaMask, type RawMask } from "./lib/trace";
 import { computeDesign, type DesignResult } from "./lib/design";
-import { SHEET_SIZES, packMixedSheet, type SheetSize } from "./lib/sheet";
+import { SHEET_SIZES, packMixedSheet, type MixedPlacement, type SheetSize } from "./lib/sheet";
 import { buildSingleStickerSVG, buildSheetSVG, type RenderOptions, type SheetItem } from "./lib/svgBuilder";
 import { getRegmarkKeepoutRects, REGMARK_ORIGIN_MM } from "./lib/regmarks";
 import { downloadSvgString } from "./lib/download";
@@ -62,6 +62,7 @@ interface AppState {
   paperTypeId: string;
   sheetIndex: number;
   fillMode: FillMode;
+  allowRotation: boolean; // let the packer turn stickers a quarter turn to fit more on the sheet
   marginMm: number; // margin and sharp corners for the next sticker added: the last values chosen
   preserveSharpCorners: boolean;
   gapMm: number;
@@ -77,9 +78,9 @@ interface AppState {
   camera: Camera;
   fitScale: number;
   editingSelected: boolean;
-  editingPlacementXY: { x: number; y: number } | null; // where the selected design's edited instance sits on the sheet (sheet tab only)
+  editingPlacementXY: { x: number; y: number; rotated: boolean } | null; // where the selected design's edited instance sits on the sheet (sheet tab only)
   needsRefit: boolean;
-  lastPlacements: { id: string; x: number; y: number }[];
+  lastPlacements: MixedPlacement[];
   cutter: CutterUiState;
 }
 
@@ -88,6 +89,7 @@ const state: AppState = {
   paperTypeId: PAPER_TYPES[0].id,
   sheetIndex: 0,
   fillMode: "single",
+  allowRotation: true,
   marginMm: 1,
   preserveSharpCorners: false,
   gapMm: 4,
@@ -147,6 +149,7 @@ const gapInput = document.getElementById("gapInput") as HTMLInputElement;
 const gapValue = document.getElementById("gapValue") as HTMLSpanElement;
 
 const fillModeToggle = document.getElementById("fillModeToggle") as HTMLDivElement;
+const rotateToggle = document.getElementById("rotateToggle") as HTMLInputElement;
 const regmarksToggle = document.getElementById("regmarksToggle") as HTMLInputElement;
 const regmarkStyleToggle = document.getElementById("regmarkStyleToggle") as HTMLDivElement;
 
@@ -320,7 +323,7 @@ function packingMarginMm(): number {
 }
 
 /** Packs the current designs onto the current sheet and resolves each placement to a renderable SheetItem. */
-function computeSheetItems(sheet: SheetSize): { placements: { id: string; x: number; y: number }[]; items: SheetItem[] } {
+function computeSheetItems(sheet: SheetSize): { placements: MixedPlacement[]; items: SheetItem[] } {
   const mixedItems = state.designs
     .filter((d) => d.design)
     .map((d) => ({ id: d.id, widthMm: d.design!.actualWmm, heightMm: d.design!.actualHmm }));
@@ -328,12 +331,12 @@ function computeSheetItems(sheet: SheetSize): { placements: { id: string; x: num
   // route packing around just those squares rather than shrinking the whole usable area from
   // every edge (see getRegmarkKeepoutRects).
   const keepouts = state.regmarksEnabled ? getRegmarkKeepoutRects(sheet.widthMm, sheet.heightMm, state.regmarkStyle === "four_corner") : [];
-  const placements = packMixedSheet(sheet, mixedItems, state.gapMm, packingMarginMm(), state.fillMode, keepouts);
+  const placements = packMixedSheet(sheet, mixedItems, state.gapMm, packingMarginMm(), state.fillMode, keepouts, state.allowRotation);
   const items: SheetItem[] = placements
     .map((p) => {
       const d = state.designs.find((dd) => dd.id === p.id);
       if (!d || !d.design) return null;
-      return { design: d.design, x: p.x, y: p.y, opts: renderOptionsFor(d) } as SheetItem;
+      return { design: d.design, x: p.x, y: p.y, rotated: p.rotated, opts: renderOptionsFor(d) } as SheetItem;
     })
     .filter((x): x is SheetItem => x !== null);
   return { placements, items };
@@ -365,6 +368,7 @@ function render() {
   fillModeToggle.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", (b as HTMLButtonElement).dataset.mode === state.fillMode);
   });
+  rotateToggle.checked = state.allowRotation;
   regmarksToggle.checked = state.regmarksEnabled;
   regmarkStyleToggle.querySelectorAll("button").forEach((b) => {
     b.classList.toggle("active", (b as HTMLButtonElement).dataset.style === state.regmarkStyle);
@@ -412,9 +416,12 @@ function render() {
     viewportInner.innerHTML = toScreenSVG(buildSheetSVG(items, sheet, currentRegmarkStyle()));
     applyCameraTransform();
     if (state.editingSelected && sel) {
-      const match = placements.find((p) => p.id === sel.id);
+      // A repack can reorder the copies, so stay on the one nearest where the selection was.
+      const prev = state.editingPlacementXY;
+      const distSq = (p: MixedPlacement) => (prev ? (p.x - prev.x) ** 2 + (p.y - prev.y) ** 2 : 0);
+      const match = placements.filter((p) => p.id === sel.id).sort((a, b) => distSq(a) - distSq(b))[0];
       if (match) {
-        state.editingPlacementXY = { x: match.x, y: match.y };
+        state.editingPlacementXY = { x: match.x, y: match.y, rotated: match.rotated };
         renderOverlay(sel);
       } else {
         state.editingSelected = false;
@@ -562,11 +569,13 @@ window.addEventListener("resize", () => {
 let panPointerId: number | null = null;
 let panLast = { x: 0, y: 0 };
 
-function hitTestPlacement(mmX: number, mmY: number): { id: string; x: number; y: number } | null {
+function hitTestPlacement(mmX: number, mmY: number): MixedPlacement | null {
   for (const p of state.lastPlacements) {
     const d = state.designs.find((dd) => dd.id === p.id);
     if (!d || !d.design) continue;
-    if (mmX >= p.x && mmX <= p.x + d.design.actualWmm && mmY >= p.y && mmY <= p.y + d.design.actualHmm) {
+    const w = p.rotated ? d.design.actualHmm : d.design.actualWmm;
+    const h = p.rotated ? d.design.actualWmm : d.design.actualHmm;
+    if (mmX >= p.x && mmX <= p.x + w && mmY >= p.y && mmY <= p.y + h) {
       return p;
     }
   }
@@ -593,7 +602,7 @@ previewHost.addEventListener("pointerdown", (e) => {
     if (hit) {
       state.selectedDesignId = hit.id;
       state.editingSelected = true;
-      state.editingPlacementXY = { x: hit.x, y: hit.y };
+      state.editingPlacementXY = { x: hit.x, y: hit.y, rotated: hit.rotated };
       renderOverlay(selectedDesign());
       renderThumbStrip();
       return;
@@ -643,9 +652,9 @@ function renderOverlay(design: StickerDesign | null) {
   if (!state.editingSelected) return;
   if (state.activeTab === "sheet" && !state.editingPlacementXY) return;
 
-  const offset = state.activeTab === "sheet" ? state.editingPlacementXY! : { x: 0, y: 0 };
-  const w = design.design.actualWmm;
-  const h = design.design.actualHmm;
+  const offset = state.activeTab === "sheet" ? state.editingPlacementXY! : { x: 0, y: 0, rotated: false };
+  const w = offset.rotated ? design.design.actualHmm : design.design.actualWmm;
+  const h = offset.rotated ? design.design.actualWmm : design.design.actualHmm;
   const [x0, y0] = mmToScreen(state.camera, offset.x, offset.y);
   const [x1, y1] = mmToScreen(state.camera, offset.x + w, offset.y + h);
 
@@ -754,9 +763,9 @@ function startResize(e: PointerEvent, design: StickerDesign, hd: (typeof HANDLE_
   e.preventDefault();
   if (!design.design) return;
 
-  const offset = state.activeTab === "sheet" ? state.editingPlacementXY! : { x: 0, y: 0 };
-  const w0 = design.design.actualWmm;
-  const h0 = design.design.actualHmm;
+  const offset = state.activeTab === "sheet" ? state.editingPlacementXY! : { x: 0, y: 0, rotated: false };
+  const w0 = offset.rotated ? design.design.actualHmm : design.design.actualWmm;
+  const h0 = offset.rotated ? design.design.actualWmm : design.design.actualHmm;
   const anchorMm: [number, number] = [offset.x + hd.anchor[0] * w0, offset.y + hd.anchor[1] * h0];
   const originalCornerMm: [number, number] = [offset.x + hd.corner[0] * w0, offset.y + hd.corner[1] * h0];
   const originalDist = Math.hypot(originalCornerMm[0] - anchorMm[0], originalCornerMm[1] - anchorMm[1]);
@@ -800,7 +809,7 @@ function startResize(e: PointerEvent, design: StickerDesign, hd: (typeof HANDLE_
         .map((p) => {
           const d = state.designs.find((dd) => dd.id === p.id);
           if (!d || !d.design) return null;
-          return { design: d.design, x: p.x, y: p.y, opts: renderOptionsFor(d) } as SheetItem;
+          return { design: d.design, x: p.x, y: p.y, rotated: p.rotated, opts: renderOptionsFor(d) } as SheetItem;
         })
         .filter((x): x is SheetItem => x !== null);
       viewportInner.innerHTML = toScreenSVG(buildSheetSVG(items, sheetAtStart, currentRegmarkStyle()));
@@ -946,6 +955,11 @@ fillModeToggle.addEventListener("click", (e) => {
   const btn = (e.target as HTMLElement).closest("button[data-mode]") as HTMLButtonElement | null;
   if (!btn) return;
   state.fillMode = btn.dataset.mode as FillMode;
+  recompute();
+});
+
+rotateToggle.addEventListener("change", () => {
+  state.allowRotation = rotateToggle.checked;
   recompute();
 });
 

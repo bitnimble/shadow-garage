@@ -75,6 +75,14 @@ export function scaleContours(contours: Contour[], sx: number, sy: number): Cont
   return contours.map((c) => c.map(([x, y]) => [x * sx, y * sy] as Point));
 }
 
+/**
+ * Turns contours a quarter turn clockwise (as drawn, y down). `heightMm` is the height of their
+ * bounding box, which must start at (0,0); the result's bounding box starts at (0,0) too.
+ */
+export function rotateContoursQuarterTurn(contours: Contour[], heightMm: number): Contour[] {
+  return contours.map((c) => c.map(([x, y]) => [heightMm - y, x] as Point));
+}
+
 /** Builds an SVG path `d` attribute from one or more closed contours (evenodd fill rule for holes). */
 export function contoursToPathD(contours: Contour[], decimals = 3): string {
   return contours
