@@ -48,18 +48,18 @@ describe("buildSheetSVG", () => {
       actualWmm: 10,
       actualHmm: 10,
     };
-    const colorAdjust = { brightness: -25, contrast: 20, saturation: 40 };
+    const colorAdjust = { brightness: -25, contrast: 20, saturation: 40, paleTints: 0 };
     const opts = { imageDataUrl: "data:,", borderColor: "#fff", cutStrokeWidthMm: 0.1, showBorder: true, colorAdjust };
     const svg = buildSheetSVG([{ design, x: 0, y: 0, opts }, { design, x: 20, y: 0, opts }], letter, "standard");
     expect(svg.match(/<filter /g)).toHaveLength(1);
     expect(svg).toContain('<feColorMatrix type="saturate" values="1.4"/>');
-    // out = 0.75 * (1.2x - 0.1): slope 0.9, intercept -0.075
-    expect(svg).toContain('<feFuncR type="linear" slope="0.9" intercept="-0.075"/>');
-    expect(svg.match(/<image [^>]*filter="url\(#color-adjust-m25_20_40\)"/g)).toHaveLength(2);
+    // out = 0.75 * (1.2x - 0.1), clamped: 0 at black, 0.825 at white.
+    expect(svg).toMatch(/<feFuncR type="table" tableValues="0 [^"]* 0.825"\/>/);
+    expect(svg.match(/<image [^>]*filter="url\(#color-adjust-m25_20_40_0\)"/g)).toHaveLength(2);
     // Border fill, cut lines and marks stay unfiltered so they keep printing white/red/black.
     expect(svg.match(/filter="/g)).toHaveLength(2);
 
-    for (const none of [undefined, { brightness: 0, contrast: 0, saturation: 0 }]) {
+    for (const none of [undefined, { brightness: 0, contrast: 0, saturation: 0, paleTints: 0 }]) {
       const plain = buildSheetSVG([{ design, x: 0, y: 0, opts: { ...opts, colorAdjust: none } }], letter);
       expect(plain).not.toContain("<filter");
       expect(plain).not.toContain("filter=");

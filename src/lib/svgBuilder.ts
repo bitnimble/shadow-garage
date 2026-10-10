@@ -1,53 +1,18 @@
 import { placedCutContours, type DesignResult } from "./design";
 import { contoursToPathD } from "./geometry";
+import { colorAdjustFilter, colorAdjustId, isNoColorAdjust, type ColorAdjust } from "./colorAdjust";
 import { buildRegmarksSVG } from "./regmarks";
 import type { SheetSize } from "./sheet";
 
 export const CUT_LINE_COLOR = "#ff0000";
-
-/**
- * Colour adjustment applied to the artwork (preview, print and export). Values are percentages,
- * 0 = unchanged, like the Epson driver's sliders. Darkening matters on foil/film stocks: inkjet
- * dye ink is translucent with no white, so pale tints all but vanish there.
- */
-export interface ColorAdjust {
-  brightness: number; // -100..100: scales every channel by (1 + b/100)
-  contrast: number; // -100..100: stretches channels around mid grey
-  saturation: number; // -100..100: feColorMatrix saturate of (1 + s/100)
-}
-
-export const NO_COLOR_ADJUST: ColorAdjust = { brightness: 0, contrast: 0, saturation: 0 };
-
-export function isNoColorAdjust(a: ColorAdjust | undefined): boolean {
-  return !a || (a.brightness === 0 && a.contrast === 0 && a.saturation === 0);
-}
 
 export interface RenderOptions {
   imageDataUrl: string;
   borderColor: string; // fill shown in the margin between artwork edge and cut line (driven by the selected paper type)
   cutStrokeWidthMm: number;
   showBorder: boolean;
-  colorAdjust?: ColorAdjust; // applied to the artwork only, never to the border, cut lines or marks
-}
-
-function colorAdjustId(a: ColorAdjust): string {
-  // "m" for minus keeps the id a plain XML name, e.g. color-adjust-m25_0_40.
-  return "color-adjust-" + [a.brightness, a.contrast, a.saturation].map((v) => String(v).replace("-", "m")).join("_");
-}
-
-function colorAdjustFilter(a: ColorAdjust): string {
-  const c = 1 + a.contrast / 100;
-  const b = 1 + a.brightness / 100;
-  // out = b * (c * x + 0.5 * (1 - c)), one linear pass per channel; the filter clamps to 0..1.
-  const slope = +(b * c).toFixed(4);
-  const intercept = +(b * 0.5 * (1 - c)).toFixed(4);
-  const fn = (ch: string) => `<feFunc${ch} type="linear" slope="${slope}" intercept="${intercept}"/>`;
-  return (
-    `<filter id="${colorAdjustId(a)}" color-interpolation-filters="sRGB">` +
-    `<feColorMatrix type="saturate" values="${+(1 + a.saturation / 100).toFixed(4)}"/>` +
-    `<feComponentTransfer>${fn("R")}${fn("G")}${fn("B")}</feComponentTransfer>` +
-    `</filter>`
-  );
+  /** Live SVG filter on the artwork only (preview). Print/export pass pre-baked artwork instead; see colorAdjust.ts. */
+  colorAdjust?: ColorAdjust;
 }
 
 /** <defs> holding one filter per distinct colour adjustment in use, or "" when none is. */

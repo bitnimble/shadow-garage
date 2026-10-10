@@ -1,5 +1,5 @@
 import { PRINTER_PAPER_20LB, STICKER_PAPER, type CutMaterial } from "./cutter/materials";
-import type { ColorAdjust } from "./svgBuilder";
+import type { ColorAdjust } from "./colorAdjust";
 
 export interface PaperType {
   id: string;
@@ -19,10 +19,11 @@ export interface PaperType {
 }
 
 /**
- * Holographic starting point: a near-white tint like #f2f0e5 (~0.95) prints at ~0.71 and a mid tone
- * of 0.5 at ~0.37, so the pale bands of gradient art still lay down enough ink to read on foil.
+ * Holographic starting point. Pale tints at 60 plus brightness -10 take a near-white like #f2f0e5
+ * (~0.95) to ~0.61 and a mid tone of 0.5 to ~0.38, while a dark of 0.22 only drops to ~0.19, so
+ * the pale bands of gradient art lay down enough ink to read on foil without crushing the shadows.
  */
-export const HOLOGRAPHIC_COLOR_ADJUST: ColorAdjust = { brightness: -25, contrast: 0, saturation: 40 };
+export const HOLOGRAPHIC_COLOR_ADJUST: ColorAdjust = { brightness: -10, contrast: 0, saturation: 40, paleTints: 60 };
 
 // Only stocks the app can print on honestly: the border around each design is filled with
 // exportColor when printing, so a coloured stock (black, silver) would get a fake printed border

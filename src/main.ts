@@ -2,7 +2,8 @@ import "./style.css";
 import { extractAlphaMask, type RawMask } from "./lib/trace";
 import { computeDesign, type DesignResult } from "./lib/design";
 import { SHEET_SIZES, packMixedSheet, type MixedPlacement, type SheetSize } from "./lib/sheet";
-import { buildSingleStickerSVG, buildSheetSVG, NO_COLOR_ADJUST, type ColorAdjust, type RenderOptions, type SheetItem } from "./lib/svgBuilder";
+import { buildSingleStickerSVG, buildSheetSVG, type RenderOptions, type SheetItem } from "./lib/svgBuilder";
+import { bakeColorAdjust, COLOR_ADJUST_KEYS, isNoColorAdjust, NO_COLOR_ADJUST, type ColorAdjust } from "./lib/colorAdjust";
 import { getRegmarkKeepoutRects, REGMARK_ORIGIN_MM } from "./lib/regmarks";
 import { downloadSvgString } from "./lib/download";
 import { printSvg } from "./lib/print";
@@ -190,7 +191,6 @@ const CUTTER_DEBUG = new URLSearchParams(location.search).has("debug");
 const BT_SERIAL = ["btSerial", "btAnyPort", "btService"].some((k) => new URLSearchParams(location.search).has(k));
 const cutterErrorEl = document.getElementById("cutterError") as HTMLDivElement;
 const cutterMaterialEl = document.getElementById("cutterMaterial") as HTMLDivElement;
-const COLOR_ADJUST_KEYS = ["brightness", "contrast", "saturation"] as const;
 const colorSliders = Object.fromEntries(
   COLOR_ADJUST_KEYS.map((k) => [k, document.getElementById(`${k}Slider`) as HTMLInputElement])
 ) as Record<(typeof COLOR_ADJUST_KEYS)[number], HTMLInputElement>;
@@ -385,7 +385,7 @@ function render() {
   const ca = currentColorAdjust();
   for (const k of COLOR_ADJUST_KEYS) {
     colorSliders[k].value = String(ca[k]);
-    colorValues[k].textContent = ca[k] > 0 ? `+${ca[k]}` : String(ca[k]);
+    colorValues[k].textContent = ca[k] > 0 && k !== "paleTints" ? `+${ca[k]}` : String(ca[k]);
   }
   colorAdjustNote.textContent = state.colorAdjust ? "(custom)" : "(Paper Type default)";
   colorAdjustResetBtn.disabled = state.colorAdjust === null;
@@ -1012,34 +1012,65 @@ tabs.forEach((tab) => {
 });
 
 // ---- export ----
+/**
+ * Print/export version of an item: the colour adjustment baked into a high-resolution PNG instead
+ * of a live SVG filter, so the printer and other SVG tools get the adjusted pixels at full DPI.
+ */
+async function bakedItem(item: SheetItem): Promise<SheetItem> {
+  const a = item.opts.colorAdjust;
+  if (!a || isNoColorAdjust(a)) return item;
+  const { width, height } = item.design.imagePlacementMM;
+  const imageDataUrl = await bakeColorAdjust(item.opts.imageDataUrl, a, width, height);
+  return { ...item, opts: { ...item.opts, imageDataUrl, colorAdjust: undefined } };
+}
+
+/** Builds the SVG for printing/export of whatever the active tab shows, with baked colour. */
+async function buildOutputSVG(includeCutLines: boolean): Promise<string | null> {
+  const sheet = currentSheet();
+  if (state.activeTab === "design") {
+    const sel = selectedDesign();
+    if (!sel?.design) return null;
+    const { opts } = await bakedItem({ design: sel.design, x: 0, y: 0, opts: renderOptionsFor(sel) });
+    return buildSingleStickerSVG(sel.design, opts, includeCutLines);
+  }
+  const { items } = computeSheetItems(sheet);
+  return buildSheetSVG(await Promise.all(items.map(bakedItem)), sheet, currentRegmarkStyle(), includeCutLines);
+}
+
+/** Runs a print/export, disabling its button while artwork is being baked (it can take a moment). */
+async function withBusyButton(btn: HTMLButtonElement, fn: () => Promise<void>) {
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Preparing…";
+  try {
+    await fn();
+  } catch (e) {
+    console.error(e);
+    alert(`Couldn't prepare the artwork: ${e instanceof Error ? e.message : e}`);
+  } finally {
+    btn.textContent = label;
+    btn.disabled = false;
+  }
+}
+
 function baseName(): string {
   const sel = selectedDesign();
   return (sel?.fileName || "sticker").replace(/\.[^.]+$/, "");
 }
 
-downloadSvgBtn.addEventListener("click", () => {
-  const sheet = currentSheet();
-  if (state.activeTab === "design") {
-    const sel = selectedDesign();
-    if (!sel?.design) return;
-    downloadSvgString(buildSingleStickerSVG(sel.design, renderOptionsFor(sel)), `${baseName()}-cut.svg`);
-  } else {
-    const { items } = computeSheetItems(sheet);
-    downloadSvgString(buildSheetSVG(items, sheet, currentRegmarkStyle()), `stickers-sheet.svg`);
-  }
-});
+downloadSvgBtn.addEventListener("click", () =>
+  withBusyButton(downloadSvgBtn, async () => {
+    const svg = await buildOutputSVG(true);
+    if (svg) downloadSvgString(svg, state.activeTab === "design" ? `${baseName()}-cut.svg` : `stickers-sheet.svg`);
+  })
+);
 
-printBtn.addEventListener("click", () => {
-  const sheet = currentSheet();
-  if (state.activeTab === "design") {
-    const sel = selectedDesign();
-    if (!sel?.design) return;
-    printSvg(buildSingleStickerSVG(sel.design, renderOptionsFor(sel), state.printCutLines));
-  } else {
-    const { items } = computeSheetItems(sheet);
-    printSvg(buildSheetSVG(items, sheet, currentRegmarkStyle(), state.printCutLines));
-  }
-});
+printBtn.addEventListener("click", () =>
+  withBusyButton(printBtn, async () => {
+    const svg = await buildOutputSVG(state.printCutLines);
+    if (svg) printSvg(svg);
+  })
+);
 
 printCutLinesToggle.addEventListener("change", () => {
   state.printCutLines = printCutLinesToggle.checked;
