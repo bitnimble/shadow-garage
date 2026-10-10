@@ -1062,7 +1062,7 @@ function renderCutter() {
   const m = currentCutMaterial();
   const { speed: defaultSpeed, pressure: defaultPressure } = currentPaperType().cutMaterial;
   cutterMaterialEl.textContent = `Cut settings: ${m.name}, blade ${m.autoBladeDepth} (set by Paper Type)`;
-  cutSpeedSlider.max = String(c.session?.model.speedRange[1] ?? 10);
+  cutSpeedSlider.max = String(Math.max(c.session?.model.speedRange[1] ?? 10, m.speed));
   cutSpeedSlider.value = String(m.speed);
   cutSpeedValue.textContent = String(m.speed);
   cutSpeedDefault.textContent = m.speed === defaultSpeed ? "(Paper Type default)" : `(Paper Type default ${defaultSpeed})`;

@@ -108,8 +108,8 @@ export const CUTTER_MODELS: CutterModel[] = [
     regmarks: "standard",
     regmarkArgOrder: "height_width",
     homeCommand: null,
-    // Replies -1 after measuring the square unless the search starts below it; 6 mm clears a
-    // 5.5 mm square (tuned on hardware), not a larger one.
+    // Replies -1 after measuring the square unless the search starts below it; 6 mm clears the
+    // 5 mm square (REGMARK_SQUARE_MM; tuned on hardware), not a larger one.
     regmarkScanOffsetMm: 6,
     regmarkSearchMarginMm: 0,
     regmarkSearchStepsMm: [0, 2, 4, 6],

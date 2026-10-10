@@ -49,8 +49,8 @@ roll the driver back in Device Manager. Bluetooth isn't tested on Windows either
 
 ## Bluetooth (macOS and Linux)
 
-The Cameo 3 and 4 can also be driven over Bluetooth. This is new and not yet confirmed on hardware; USB
-is the proven path.
+The Cameo 3 and 4 can also be driven over Bluetooth. So far only a Cameo 4 has been driven over it on
+hardware (Bluetooth LE); USB is the proven path.
 
 1. Unplug the USB cable, quit Silhouette Studio, and turn on the cutter's Bluetooth.
 2. **Pair the cutter with the computer first**: **System Settings → Bluetooth** on macOS, or
