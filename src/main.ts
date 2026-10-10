@@ -140,7 +140,7 @@ const paperTypeGrid = document.getElementById("paperTypeGrid") as HTMLDivElement
 const sheetSelect = document.getElementById("sheetSelect") as HTMLSelectElement;
 
 const marginSlider = document.getElementById("marginSlider") as HTMLInputElement;
-const marginValue = document.getElementById("marginValue") as HTMLSpanElement;
+const marginInput = document.getElementById("marginInput") as HTMLInputElement;
 const marginForEl = document.getElementById("marginFor") as HTMLSpanElement;
 const sharpCornersToggle = document.getElementById("sharpCornersToggle") as HTMLInputElement;
 const gapInput = document.getElementById("gapInput") as HTMLInputElement;
@@ -356,7 +356,7 @@ function render() {
   // paper/sheet/margin/gap/fillMode control mirrors
   const selForMargin = selectedDesign();
   const margin = selForMargin?.marginMm ?? state.marginMm;
-  marginValue.textContent = margin.toFixed(1);
+  if (document.activeElement !== marginInput) marginInput.value = margin.toFixed(1);
   marginSlider.value = String(margin);
   sharpCornersToggle.checked = selForMargin?.preserveSharpCorners ?? state.preserveSharpCorners;
   marginForEl.textContent = selForMargin && state.designs.length > 1 ? `for ${selForMargin.fileName}` : "";
@@ -909,12 +909,26 @@ sheetSelect.addEventListener("change", () => {
 });
 
 // Margin and sharp corners apply to the selected sticker, and become the default for new ones.
-marginSlider.addEventListener("input", () => {
-  state.marginMm = parseFloat(marginSlider.value);
+function setMarginMm(mm: number) {
+  state.marginMm = Math.round(mm * 10) / 10; // same 0.1 mm steps as the slider
   const sel = selectedDesign();
   if (sel) sel.marginMm = state.marginMm;
   recompute();
+}
+
+marginSlider.addEventListener("input", () => setMarginMm(parseFloat(marginSlider.value)));
+
+marginInput.addEventListener("input", () => {
+  const v = parseFloat(marginInput.value);
+  if (!Number.isFinite(v) || v <= 0) return;
+  setMarginMm(clamp(v, parseFloat(marginSlider.min), parseFloat(marginSlider.max)));
 });
+// Once typing is done (Enter or leaving the box), show the stored value: clamped, one decimal.
+function syncMarginInput() {
+  marginInput.value = (selectedDesign()?.marginMm ?? state.marginMm).toFixed(1);
+}
+marginInput.addEventListener("change", syncMarginInput);
+marginInput.addEventListener("blur", syncMarginInput);
 
 sharpCornersToggle.addEventListener("change", () => {
   state.preserveSharpCorners = sharpCornersToggle.checked;
