@@ -91,6 +91,28 @@
             </div>
 
             <div class="panel-block">
+              <div class="block-title">Color Adjust <span id="colorAdjustNote" class="block-title-note"></span></div>
+              <label class="field-label">
+                Brightness: <span id="brightnessValue">0</span>
+                <input id="brightnessSlider" type="range" min="-60" max="40" step="1" value="0" />
+              </label>
+              <label class="field-label">
+                Pale tints: <span id="paleTintsValue">0</span>
+                <input id="paleTintsSlider" type="range" min="0" max="100" step="1" value="0" />
+              </label>
+              <label class="field-label">
+                Contrast: <span id="contrastValue">0</span>
+                <input id="contrastSlider" type="range" min="-50" max="50" step="1" value="0" />
+              </label>
+              <label class="field-label">
+                Saturation: <span id="saturationValue">0</span>
+                <input id="saturationSlider" type="range" min="-100" max="100" step="1" value="0" />
+              </label>
+              <button id="colorAdjustResetBtn" class="btn-secondary small" type="button" style="margin-top: 6px;">Reset to Paper Type</button>
+              <div class="hint-text">Applied to the artwork in the preview, print and SVG export. Inkjet ink is see-through on holographic and clear stock, so pale colors barely show. Pale tints darkens light colors while leaving dark ones mostly alone; Brightness darkens everything.</div>
+            </div>
+
+            <div class="panel-block">
               <div class="block-title">Paper Size</div>
               <select id="sheetSelect"></select>
             </div>
